@@ -2,7 +2,7 @@ CC = gcc
 CCFLAGS = -Wall -g -O3 -fomit-frame-pointer
 INCLUDES = $(shell sdl-config --cflags)
 LDFLAGS =
-LIBS = $(shell sdl-config --libs)
+LIBS = $(shell sdl-config --libs) -lgmp
 
 SRCS = mandel.c
 

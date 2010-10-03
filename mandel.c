@@ -1,16 +1,18 @@
 #include <stdlib.h>
 #include <SDL.h>
+#include <gmp.h>
+#include <math.h>
 
 static SDL_Surface *screen, *origin;
 static int screen_width, screen_height;
-static float re_min = -2;
-static float re_max = 1;
-static float im_min = -1;
-static float im_max = 1;
-static float x0_inc, y0_inc;
+static mpf_t re_min;
+static mpf_t re_max;
+static mpf_t im_min;
+static mpf_t im_max;
+static mpf_t x0_inc, y0_inc;
 static int max_iters = 1000;
-static stale = 1;
-static last_display;
+static int stale = 1;
+static int last_display;
 static int start_pick_x, start_pick_y, end_pick_x, end_pick_y;
 
 void sdl_set_video_mode(unsigned int screen_width,
@@ -66,57 +68,121 @@ void putpixel(int x, int y, Uint32 pixel)
 void generate_mandel()
 {
     int image_x, image_y;
-    float x0, y0;
+    mpf_t x0, y0, x, y, xt, mag2, tmp, tmp2;
 
-    for(image_y = 0, image_x = 0, x0 = re_min; image_x < screen_width; image_x++, x0 += x0_inc, image_y = 0)
+    mpf_init(x0);
+    mpf_init(y0);
+    mpf_init(x);
+    mpf_init(y);
+    mpf_init(xt);
+    mpf_init(mag2);
+    mpf_init(tmp);
+    mpf_init(tmp2);
+
+    int start_time = SDL_GetTicks();
+
+    mpf_set(x0, re_min);
+    for(image_y = 0, image_x = 0; image_x < screen_width; image_x++, image_y = 0)
     {
-        for(y0 = im_min; image_y < screen_height; y0 += y0_inc, image_y++)
+        mpf_set(y0, im_min);
+        for(; image_y < screen_height; image_y++)
         {
             int iters = 0;
-            float x = 0, y = 0;
-            while( (x*x+y*y < 4) && (iters < max_iters) )
+            mpf_set_d(x, 0.0);
+            mpf_set_d(y, 0.0);
+            
+            while( iters < max_iters )
             {
-                float xt = x*x - y*y + x0;
-                y = 2*x*y + y0;
-                x = xt;
+                /* check for bailout */
+                mpf_mul(mag2, x, x);
+                mpf_mul(tmp, y, y);
+                mpf_add(mag2, mag2, tmp);
+                if( mpf_cmp_ui(mag2, 4) > 0 )
+                    break;
+                
+                mpf_mul(tmp2, x, x);
+                mpf_mul(tmp, y, y);
+                mpf_sub(tmp, tmp2, tmp);
+                mpf_add(tmp, tmp, x0);
+                mpf_mul(tmp2, x, y);
+                mpf_mul_ui(tmp2, tmp2, 2);
+                mpf_add(y, tmp2, y0);
+                mpf_set(x, tmp);
+
                 iters++;
             }
 
             if(iters >= max_iters)
                 putpixel(image_x, image_y, 0);
             else {
-                float smooth =  iters + 1 - log(log(sqrt(x*x+y*y)))/log(2);
-                //float norm_iters = (float)iters / max_iters;
+                double mag2_d = mpf_get_d(mag2);
+                float smooth =  iters + 1 - log(log(sqrt(mag2_d)))/log(2);
                 putpixel(image_x, image_y, SDL_MapRGB(screen->format, 0, 0, smooth * 10));
+                //float norm_iters = (float)iters / max_iters;
+                //putpixel(image_x, image_y, SDL_MapRGB(screen->format, 0, 0, norm_iters * 256 * 200));
             }
+
+            mpf_add(y0, y0, y0_inc);
         }
 
         /* flip screen after 1 second */
         if(SDL_GetTicks() - last_display > 1000) {
             SDL_Flip(screen);
             last_display = SDL_GetTicks();
-        }        
+        }
+
+        mpf_add(x0, x0, x0_inc);
     }
+
+    printf("time to compute = %f sec\n", ((float)SDL_GetTicks() - start_time)/1000);
 }
 
 void update_coords()
 {
     /* linearly interpolate to get coords from picked locations */
     
-    float new_re_min, new_re_max;
-    float new_im_min, new_im_max;
+    mpf_t new_re_min, new_re_max;
+    mpf_t new_im_min, new_im_max;
+
+    mpf_init(new_re_min);
+    mpf_init(new_re_max);
+    mpf_init(new_im_min);
+    mpf_init(new_im_max);
     
-    new_re_min = (float)start_pick_x / screen_width * (re_max - re_min) + re_min;
-    new_re_max = (float)end_pick_x / screen_width * (re_max - re_min) + re_min;
-    new_im_min = (float)start_pick_y / screen_height * (im_max - im_min) + im_min;
-    new_im_max = (float)end_pick_y / screen_height * (im_max - im_min) + im_min;
+    mpf_t tmp;
+    
+    mpf_init(tmp);
+    
+    mpf_set_d(tmp, (float)start_pick_x / screen_width);
+    mpf_sub(new_re_min, re_max, re_min);
+    mpf_mul(new_re_min, new_re_min, tmp);
+    mpf_add(new_re_min, new_re_min, re_min);
 
-    re_min = new_re_min;
-    re_max = new_re_max;
-    im_min = new_im_min;
-    im_max = new_im_max;
+    mpf_set_d(tmp, (float)end_pick_x / screen_width);
+    mpf_sub(new_re_max, re_max, re_min);
+    mpf_mul(new_re_max, new_re_max, tmp);
+    mpf_add(new_re_max, new_re_max, re_min);
 
-    printf("new coords (%f, %f) to (%f, %f)\n", re_min, im_max, re_max, im_max);
+    mpf_set_d(tmp, (float)start_pick_y / screen_height);
+    mpf_sub(new_im_min, im_max, im_min);
+    mpf_mul(new_im_min, new_im_min, tmp);
+    mpf_add(new_im_min, new_im_min, im_min);
+
+    mpf_set_d(tmp, (float)end_pick_y / screen_height);
+    mpf_sub(new_im_max, im_max, im_min);
+    mpf_mul(new_im_max, new_im_max, tmp);
+    mpf_add(new_im_max, new_im_max, im_min);
+
+    mpf_set(re_min, new_re_min);
+    mpf_set(re_max, new_re_max);
+    mpf_set(im_min, new_im_min);
+    mpf_set(im_max, new_im_max);
+
+    printf("new coords (%f, %f) to (%f, %f)\n", 
+           mpf_get_d(re_min),
+           mpf_get_d(im_max),
+           mpf_get_d(re_max),
+           mpf_get_d(im_max));
 }
 
 void draw_box()
@@ -153,6 +219,13 @@ int main(int argc, char *argv[])
         printf("usage: %s <width> <height>\n", argv[0]);
         exit(1);
     }
+    
+    mpf_init_set_d(re_min, -2.0);
+    mpf_init_set_d(re_max, 2.0);
+    mpf_init_set_d(im_min, -1.0);
+    mpf_init_set_d(im_max, 1.0);
+    mpf_init(x0_inc);
+    mpf_init(y0_inc);
 
     screen_width = atoi(argv[1]);
     screen_height = atoi(argv[2]);
@@ -177,8 +250,11 @@ int main(int argc, char *argv[])
             stale = 0;
             last_display = SDL_GetTicks();
 
-            x0_inc = (re_max - re_min) / screen_width;
-            y0_inc = (im_max - im_min) / screen_height;
+            mpf_sub(x0_inc, re_max, re_min);
+            mpf_div_ui(x0_inc, x0_inc, screen_width);
+            mpf_sub(y0_inc, im_max, im_min);
+            mpf_div_ui(y0_inc, y0_inc, screen_height);
+
             generate_mandel();
             SDL_BlitSurface(screen, NULL, origin, NULL);
             SDL_Flip(screen);
