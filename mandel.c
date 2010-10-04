@@ -221,7 +221,7 @@ int main(int argc, char *argv[])
     }
     
     mpf_init_set_d(re_min, -2.0);
-    mpf_init_set_d(re_max, 2.0);
+    mpf_init_set_d(re_max, 1.0);
     mpf_init_set_d(im_min, -1.0);
     mpf_init_set_d(im_max, 1.0);
     mpf_init(x0_inc);
