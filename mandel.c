@@ -14,12 +14,13 @@ static mpf_t re_max;
 static mpf_t im_min;
 static mpf_t im_max;
 static mpf_t x0_inc, y0_inc;
-static int max_iters = 200;
+static int max_iters = 500;
 static int stale = 1;
 static int start_pick_x, start_pick_y, end_pick_x, end_pick_y;
 static Uint32 *shared_data;
 static float *status;
-static int num_processes;
+static int num_processes = 1;
+static smooth_coloring = 0;
 
 void sdl_set_video_mode(unsigned int screen_width,
                         unsigned int screen_height,
@@ -127,13 +128,48 @@ void run_child_generator(int process_num)
                 //putpixel(image_x, image_y, 0);
                 /* already zeroed */
             } else {
-                double mag2_d = mpf_get_d(mag2);
-                float smooth =  iters + 1 - log(log(sqrt(mag2_d)))/log(2);
-                //putpixel(image_x, image_y, SDL_MapRGB(screen->format, 0, 0, smooth * 10));
-                //float norm_iters = (float)iters / max_iters;
-                //putpixel(image_x, image_y, SDL_MapRGB(screen->format, 0, 0, norm_iters * 256 * 200));
+                
+                Uint32 color;
+                
+                if(smooth_coloring)
+                {
+                    double mag2_d = mpf_get_d(mag2);
+                    float smooth =  iters + 1 - log(log(sqrt(mag2_d)))/log(2);
+                    
+                    float mod = 10.0f;
+                    
+                    if(smooth < 0.167)
+                        color = SDL_MapRGB(screen->format, 0, 0, smooth * mod);
+                    else if(smooth < 0.333)
+                        color = SDL_MapRGB(screen->format, 0, smooth * mod, (1-smooth) * mod);
+                    else if(smooth < 0.5)
+                        color = SDL_MapRGB(screen->format, smooth * mod, smooth * mod, (1-smooth) * mod);
+                    else if(smooth < 0.667)
+                        color = SDL_MapRGB(screen->format, smooth * mod, smooth * mod, (1-smooth) * mod);
+                    else if(smooth < 0.833)
+                        color = SDL_MapRGB(screen->format, smooth * mod, (1-smooth) * mod, (1-smooth) * mod);
+                    else
+                        color = SDL_MapRGB(screen->format, (1-smooth) * mod, (1-smooth) * mod, (1-smooth) * mod);
+                } else {
+                    float mod = 256.0f * 50;
 
-                shared_data[image_y*screen_width + image_x] = SDL_MapRGB(screen->format, 0, 0, smooth * 10);
+                    float norm_iters = (float)iters / max_iters;
+                    
+                    if(norm_iters < 0.167)
+                        color = SDL_MapRGB(screen->format, 0, 0, norm_iters * mod);
+                    else if(norm_iters < 0.333)
+                        color = SDL_MapRGB(screen->format, 0, norm_iters * mod, (1-norm_iters) * mod);
+                    else if(norm_iters < 0.5)
+                        color = SDL_MapRGB(screen->format, norm_iters * mod, norm_iters * mod, (1-norm_iters) * mod);
+                    else if(norm_iters < 0.667)
+                        color = SDL_MapRGB(screen->format, norm_iters * mod, norm_iters * mod, (1-norm_iters) * mod);
+                    else if(norm_iters < 0.833)
+                        color = SDL_MapRGB(screen->format, norm_iters * mod, (1-norm_iters) * mod, (1-norm_iters) * mod);
+                    else
+                        color = SDL_MapRGB(screen->format, (1-norm_iters) * mod, (1-norm_iters) * mod, (1-norm_iters) * mod);
+                }                
+
+                shared_data[image_y*screen_width + image_x] = color;
             }
 
             /* update status */
@@ -231,25 +267,51 @@ void copy_data()
             putpixel(w, h, shared_data[h*screen_width+w]);
 }
 
+void print_usage()
+{
+    printf("usage ./mandel [options] <width> <height>\n");
+    printf("           -s             : turns on smooth coloring\n");
+    printf("           -m <iters>     : sets the maximum iterations for bailout\n");
+    printf("           -n <processes> : sets the number of parallel processes to run\n");
+}
+
 int main(int argc, char *argv[])
 {
-    if(argc != 4)
+    int c;
+
+    while ((c = getopt (argc, argv, "sm:n:")) != -1)
+        switch (c)
+        {
+        case 's':
+            smooth_coloring = 1;
+            break;
+        case 'm':
+            max_iters = atoi(optarg);
+            break;
+        case 'n':
+            num_processes = atoi(optarg);
+            break;
+        default:
+            print_usage();
+            exit(1);
+        }
+    
+    if(argc - optind != 2)
     {
-        printf("usage: %s <width> <height> <num-processes>\n", argv[0]);
+        print_usage();
         exit(1);
     }
-   
+
+    screen_width = atoi(argv[optind]);
+    screen_height = atoi(argv[optind+1]);
+     
     mpf_init_set_d(re_min, -2.0);
     mpf_init_set_d(re_max, 1.0);
     mpf_init_set_d(im_min, -1.0);
     mpf_init_set_d(im_max, 1.0);
     mpf_init(x0_inc);
     mpf_init(y0_inc);
-
-    screen_width = atoi(argv[1]);
-    screen_height = atoi(argv[2]);
-    num_processes = atoi(argv[3]);
-   
+  
     SDL_Init(SDL_INIT_VIDEO);
 
     sdl_set_video_mode(screen_width, screen_height, 0);
