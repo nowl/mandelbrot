@@ -7,6 +7,10 @@
 #include <SDL.h>
 #include <gmp.h>
 
+#define PI 3.1415926f
+#define MOD 256.0f
+#define SMOOTHING_MOD 4.0f
+
 static SDL_Surface *screen, *origin;
 static int screen_width, screen_height;
 static mpf_t re_min;
@@ -29,6 +33,7 @@ static float *status;
 static int num_processes = 1;
 static int smooth_coloring = 0;
 static int multiple_precision = 0;
+static int maintain_aspect_ratio = 0;
 
 void sdl_set_video_mode(unsigned int screen_width,
                         unsigned int screen_height,
@@ -80,44 +85,38 @@ void putpixel(int x, int y, Uint32 pixel)
     }
 }
 
+int radial_color(float radial_iters)
+{
+    if(radial_iters < (2*PI/3)) {
+        float v = radial_iters * 3/4;
+        return SDL_MapRGB(screen->format, cos(v) * MOD, sin(v) * MOD, 0);
+    } else if(radial_iters < (4*PI/3)) {
+        float v = (radial_iters - 2*PI/3) * 3/4;
+        return SDL_MapRGB(screen->format, 0, cos(v) * MOD, sin(v) * MOD);
+    } else {
+        float v = (radial_iters - 4*PI/3) * 3/4;
+        return SDL_MapRGB(screen->format, sin(v) * MOD, 0, cos(v) * MOD);
+    }
+}
+
 int smooth_color(double mag2, int iters)
 {
     double smooth =  iters + 1 - log(log(sqrt(mag2)))/log(2);
-                   
-    double mod = 10.0f;
-                   
-    if(smooth < 0.167)
-        return SDL_MapRGB(screen->format, 0, 0, smooth * mod);
-    else if(smooth < 0.333)
-        return SDL_MapRGB(screen->format, 0, smooth * mod, (1-smooth) * mod);
-    else if(smooth < 0.5)
-        return SDL_MapRGB(screen->format, smooth * mod, smooth * mod, (1-smooth) * mod);
-    else if(smooth < 0.667)
-        return SDL_MapRGB(screen->format, smooth * mod, smooth * mod, (1-smooth) * mod);
-    else if(smooth < 0.833)
-        return SDL_MapRGB(screen->format, smooth * mod, (1-smooth) * mod, (1-smooth) * mod);
-    else
-        return SDL_MapRGB(screen->format, (1-smooth) * mod, (1-smooth) * mod, (1-smooth) * mod);
+
+    float radial_iters = smooth/SMOOTHING_MOD;
+    float v = radial_iters/(2*PI);
+    if(v > 1.0)
+        radial_iters -= (int)v * 2*PI;
+        
+    return radial_color(radial_iters);
 }
 
 int plain_color(int iters)
 {
-    float mod = 256.0f * 50;
-
     float norm_iters = (float)iters / max_iters;
-                   
-    if(norm_iters < 0.167)
-        return SDL_MapRGB(screen->format, 0, 0, norm_iters * mod);
-    else if(norm_iters < 0.333)
-        return SDL_MapRGB(screen->format, 0, norm_iters * mod, (1-norm_iters) * mod);
-    else if(norm_iters < 0.5)
-        return SDL_MapRGB(screen->format, norm_iters * mod, norm_iters * mod, (1-norm_iters) * mod);
-    else if(norm_iters < 0.667)
-        return SDL_MapRGB(screen->format, norm_iters * mod, norm_iters * mod, (1-norm_iters) * mod);
-    else if(norm_iters < 0.833)
-        return SDL_MapRGB(screen->format, norm_iters * mod, (1-norm_iters) * mod, (1-norm_iters) * mod);
-    else
-        return SDL_MapRGB(screen->format, (1-norm_iters) * mod, (1-norm_iters) * mod, (1-norm_iters) * mod);
+    float radial_iters = norm_iters * 2*PI;
+ 
+    return radial_color(radial_iters);
 }
 
 void run_child_generator(int process_num)
@@ -329,7 +328,12 @@ void draw_box()
         end_pick_y = tmp;
     }
 
-    int color = SDL_MapRGB(screen->format, 250, 0, 0);
+    if(maintain_aspect_ratio) {
+        float ar = (float)screen_width / screen_height;
+        end_pick_y = (end_pick_x - start_pick_x) / ar + start_pick_y;
+    }
+
+    int color = SDL_MapRGB(screen->format, 250, 250, 250);
     int x, y;
 
     for(x = start_pick_x; x < end_pick_x; x++)
@@ -353,6 +357,7 @@ void copy_data()
 void print_usage()
 {
     printf("usage ./mandel [options] <width> <height>\n");
+    printf("           -a             : maintain aspect ratio while zooming\n");
     printf("           -p             : turns on abritrarily deep precision\n");
     printf("           -s             : turns on smooth coloring\n");
     printf("           -m <iters>     : sets the maximum iterations for bailout\n");
@@ -363,9 +368,12 @@ int main(int argc, char *argv[])
 {
     int c;
 
-    while ((c = getopt (argc, argv, "psm:n:")) != -1)
+    while ((c = getopt (argc, argv, "apsm:n:")) != -1)
         switch (c)
         {
+        case 'a':
+            maintain_aspect_ratio = 1;
+            break;
         case 'p':
             multiple_precision = 1;
             break;
